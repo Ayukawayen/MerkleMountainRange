@@ -1,6 +1,7 @@
 html, body {
 	font-size:2vw;
 }
+@media only screen and (min-width: 800px) { html,body {font-size:16px;} }
 
 body {
 	padding:0.5rem;
