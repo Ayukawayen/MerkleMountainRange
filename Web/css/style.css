@@ -1,0 +1,7 @@
+* {
+	box-sizing: border-box;
+}
+
+input, textarea, button {
+	font-size:1rem;
+}
