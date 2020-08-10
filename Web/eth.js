@@ -12,6 +12,7 @@ const ContractMetadata = {
 		bhl:{
 			addr: '0x9d27eb6989406becda60b5ccc118bae24e5275d6',
 			abi: [{"inputs":[],"stateMutability":"nonpayable","type":"constructor"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"startBlockNumber","type":"uint256"},{"indexed":false,"internalType":"bytes32[]","name":"blockHashes","type":"bytes32[]"}],"name":"Blockhash","type":"event"},{"stateMutability":"nonpayable","type":"fallback"}],
+			created: 8458273,
 		},
 	},
 };
@@ -19,11 +20,11 @@ const ContractMetadata = {
 var contracts = {};
 
 async function enableEth() {
-	window.web3 = new Web3(new Web3.providers.HttpProvider('https://nodes.mewapi.io/rpc/rop'));
-	
 	if(!window.ethereum) {
 		window.web3 = new Web3(new Web3.providers.HttpProvider('https://ropsten.infura.io/v3/bf949720e1b14912bd2241b0592cfc2b'));
-		contract = web3.eth.contract(ContractMetadata.abi).at(ContractMetadata.addr);
+		for(let k in ContractMetadata.contracts) {
+			contracts[k] = web3.eth.contract(ContractMetadata.contracts[k].abi).at(ContractMetadata.contracts[k].addr);
+		}
 		return {};
 	}
 	

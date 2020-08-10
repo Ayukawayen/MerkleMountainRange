@@ -16,7 +16,7 @@ async function onLoaded() {
 		return;
 	}
 	
-	await loadLoggedBlockhashes();
+	loadLoggedBlockhashes();
 	
 	baseBlockNumber = web3.toDecimal(await callAsync(contracts.mmr.getBaseBlockNumber.call));
 	size = web3.toDecimal(await callAsync(contracts.mmr.getSize.call));
@@ -42,7 +42,7 @@ async function onLoaded() {
 
 async function loadLoggedBlockhashes(contract) {
 	return new Promise((resolve, reject) => {
-		contracts.bhl.Blockhash({}, {fromBlock:0, toBlock:'latest', }).get(function(error, response) {
+		contracts.bhl.Blockhash({}, {fromBlock:ContractMetadata.contracts.bhl.created, toBlock:'latest', }).get(function(error, response) {
 			if(error) {
 				reject(error);
 				return;
