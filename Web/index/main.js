@@ -7,6 +7,7 @@ let nodeInputBlockNumber = document.querySelector('#blockNumber >input');
 let baseBlockNumber;
 let size;
 let roots;
+let blockhashes = {};
 
 async function onLoaded() {
 	let response = await enableEth();
@@ -15,15 +16,17 @@ async function onLoaded() {
 		return;
 	}
 	
-	baseBlockNumber = web3.toDecimal(await callAsync(contract.getBaseBlockNumber.call));
-	size = web3.toDecimal(await callAsync(contract.getSize.call));
+	await loadLoggedBlockhashes();
+	
+	baseBlockNumber = web3.toDecimal(await callAsync(contracts.mmr.getBaseBlockNumber.call));
+	size = web3.toDecimal(await callAsync(contracts.mmr.getSize.call));
 	
 	nodeInputBlockNumber.min = baseBlockNumber;
 	nodeInputBlockNumber.max = baseBlockNumber+size-1;
 	
 	document.querySelector('#localBlockNumber1 >input').value = baseBlockNumber+size;
 	
-	roots = await callAsync(contract.getRoots.call);
+	roots = await callAsync(contracts.mmr.getRoots.call);
 	document.querySelector('#localRoots1 >textarea').value = JSON.stringify(roots.slice(0,8));
 	
 	refreshStateText();
@@ -35,6 +38,27 @@ async function onLoaded() {
 	
 	document.querySelector('#genarate1').addEventListener('click', onGenerate1Click);
 	document.querySelector('#verify1').addEventListener('click', onVerify1Click);
+}
+
+async function loadLoggedBlockhashes(contract) {
+	return new Promise((resolve, reject) => {
+		contracts.bhl.Blockhash({}, {fromBlock:0, toBlock:'latest', }).get(function(error, response) {
+			if(error) {
+				reject(error);
+				return;
+			}
+			
+			response.forEach((item)=>{
+				let startBlockNumber = web3.toDecimal(item.args.startBlockNumber);
+				
+				item.args.blockHashes.forEach((hash,i)=>{
+					blockhashes[startBlockNumber+i] = hash;
+				});
+			});
+			
+			resolve();
+		});
+	});
 }
 
 function refreshStateText() {
@@ -64,21 +88,37 @@ async function onGenerate1Click(ev) {
 		document.querySelector('#blockHash1 >input').value = response.hash;
 	});
 	
-	contract.generateProofInfo.call(blockNumber, async (err, response)=>{
-		let length = response[0].length;
-		let totalBlockHash = 1<<length;
-		let countBlockHash = 1;
-		let proof = [];
-		for(let i=0; i<length; ++i) {
-			proof[i] = await generateRoot(web3.toDecimal(response[0][i][0]), i);
-			countBlockHash += 1<<i;
-			document.querySelector('#proof1 >textarea').value = `Loading... (${countBlockHash}/${totalBlockHash})`;
-		}
-		document.querySelector('#proof1 >textarea').value = JSON.stringify(proof);
-	});
+	let startBlockNumbers = generateProofStartBlockNumbers(blockNumber, size);
+	let length = startBlockNumbers.length;
+	let totalBlockHash = 1<<length;
+	let countBlockHash = 1;
+	let proof = [];
+	for(let i=0; i<length; ++i) {
+		proof[i] = await generateRoot(startBlockNumbers[i], i);
+		countBlockHash += 1<<i;
+		document.querySelector('#proof1 >textarea').value = `Loading... (${countBlockHash}/${totalBlockHash})`;
+	}
+	document.querySelector('#proof1 >textarea').value = JSON.stringify(proof);
 }
 
-let blockhashes = {};
+function generateProofStartBlockNumbers(blockNumber, localSize) {
+	let offset = blockNumber - baseBlockNumber;
+	let order;
+	for(order=30; order>0; --order) {
+		if((localSize & (1<<order))>0 && (offset & (1<<order))<=0 ) break;
+	}
+
+	let startBlockNumber = baseBlockNumber + ( localSize>>(order+1)<<(order+1) );
+	offset = blockNumber - startBlockNumber;
+	
+	let result = [];
+	
+	for(let i=0; i<order; ++i) {
+		result[i] = startBlockNumber + (((offset>>i)^1)<<i);
+	}
+	
+	return result;
+}
 
 async function generateRoot(blockNumber, height) {
 	let size = 1<<height;
@@ -121,7 +161,7 @@ async function onVerifyClick(num) {
 	
 	let response;
 	try {
-		response = await callAsync(contract.verify.call, [
+		response = await callAsync(contracts.mmr.verify.call, [
 			document.querySelector(`#blockNumber >input`).value,
 			document.querySelector(`#blockHash${num} >input`).value,
 			JSON.parse(document.querySelector(`#proof${num} >textarea`).value),
@@ -131,6 +171,5 @@ async function onVerifyClick(num) {
 	} catch (error) {
 		response = error.message;
 	}
-	
-	document.querySelector(`#verifyResult${num}`).textContent = response;
+	document.querySelector(`#verifyResult${num}`).textContent = response[0];
 }
