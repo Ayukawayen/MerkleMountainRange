@@ -6,7 +6,7 @@ let nodeInputBlockNumber = document.querySelector('#blockNumber >input');
 
 let baseBlockNumber;
 let size;
-let roots;
+let peaks;
 let blockhashes = {};
 
 async function onLoaded() {
@@ -26,8 +26,8 @@ async function onLoaded() {
 	
 	document.querySelector('#localBlockNumber1 >input').value = baseBlockNumber+size;
 	
-	roots = await callAsync(contracts.mmr.getRoots.call);
-	document.querySelector('#localRoots1 >textarea').value = JSON.stringify(roots.slice(0,8));
+	peaks = await callAsync(contracts.mmr.getPeaks.call);
+	document.querySelector('#localPeaks1 >textarea').value = JSON.stringify(peaks.slice(0,8));
 	
 	refreshStateText();
 	
@@ -66,11 +66,11 @@ function refreshStateText() {
 	let n = baseBlockNumber + size;
 	
 	for(let i=0;i<32;++i) {
-		if(roots[i] == 0) continue;
+		if(peaks[i] == 0) continue;
 		
 		n -= 1<<i;
 		
-		text += `roots[${i}]${i>9?'':' '}, hash of Block[${n}-${n+(1<<i)-1}]: ${roots[i]}\r\n`;
+		text += `peaks[${i}]${i>9?'':' '}, hash of Block[${n}-${n+(1<<i)-1}]: ${peaks[i]}\r\n`;
 	}
 	document.querySelector('#state >pre').textContent = text;
 }
@@ -94,7 +94,7 @@ async function onGenerate1Click(ev) {
 	let countBlockHash = 1;
 	let proof = [];
 	for(let i=0; i<length; ++i) {
-		proof[i] = await generateRoot(startBlockNumbers[i], i);
+		proof[i] = await generatePeak(startBlockNumbers[i], i);
 		countBlockHash += 1<<i;
 		document.querySelector('#proof1 >textarea').value = `Loading... (${countBlockHash}/${totalBlockHash})`;
 	}
@@ -120,7 +120,7 @@ function generateProofStartBlockNumbers(blockNumber, localSize) {
 	return result;
 }
 
-async function generateRoot(blockNumber, height) {
+async function generatePeak(blockNumber, height) {
 	let size = 1<<height;
 	let values = [];
 	
@@ -166,7 +166,7 @@ async function onVerifyClick(num) {
 			document.querySelector(`#blockHash${num} >input`).value,
 			JSON.parse(document.querySelector(`#proof${num} >textarea`).value),
 			document.querySelector(`#localBlockNumber${num} >input`).value,
-			JSON.parse(document.querySelector(`#localRoots${num} >textarea`).value),
+			JSON.parse(document.querySelector(`#localPeaks${num} >textarea`).value),
 		]);
 	} catch (error) {
 		response = error.message;

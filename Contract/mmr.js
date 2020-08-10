@@ -24,7 +24,7 @@ contract MMRStorage is MMRToken {
 	uint internal constant MAX_DEPTH = 40;
 	
 	uint _packedData;
-	bytes32[MAX_DEPTH] public _roots;
+	bytes32[MAX_DEPTH] public _peaks;
 	
 	function unpackData() internal view returns (uint gasPrice, uint64 baseBlockNumber, uint64 size) {
 		uint data = _packedData;
@@ -48,10 +48,10 @@ contract MMRStorage is MMRToken {
 		(uint price, , ) = unpackData();
 		return price;
 	}
-	function getRoots() public view returns (bytes32[MAX_DEPTH] memory result) {
+	function getPeaks() public view returns (bytes32[MAX_DEPTH] memory result) {
 		uint64 size = getSize();
 		for(uint i=0;i<MAX_DEPTH;++i) {
-			result[i] = isActive(i, size) ? _roots[i] : bytes32(0);
+			result[i] = isActive(i, size) ? _peaks[i] : bytes32(0);
 		}
 	}
 	
@@ -105,19 +105,19 @@ contract MMRStorage is MMRToken {
 		
 		
 		uint i;
-		bytes32[MAX_DEPTH] memory roots;
-		bytes32[MAX_DEPTH] memory originRoots;
+		bytes32[MAX_DEPTH] memory peaks;
+		bytes32[MAX_DEPTH] memory originPeaks;
 		for(i=0; i<MAX_DEPTH; ++i) {
-		    originRoots[i] = roots[i] = _roots[i];
+		    originPeaks[i] = peaks[i] = _peaks[i];
 		}
 		
 		for(i=0;i<l;++i) {
-			advanceOne(roots, baseBlockNumber, size+i);
+			advanceOne(peaks, baseBlockNumber, size+i);
 		}
 		
 		for(i=0; i<MAX_DEPTH; ++i) {
-			if(roots[i] != originRoots[i]) {
-				_roots[i] = roots[i];
+			if(peaks[i] != originPeaks[i]) {
+				_peaks[i] = peaks[i];
 			}
 		}
 		
@@ -128,33 +128,33 @@ contract MMRStorage is MMRToken {
 		_mint(msg.sender, gas - gasleft());
 	}
 	
-	function advanceOne(bytes32[MAX_DEPTH] memory roots, uint baseBlockNumber, uint size) internal view {
+	function advanceOne(bytes32[MAX_DEPTH] memory peaks, uint baseBlockNumber, uint size) internal view {
 		bytes32 hash = blockhash(baseBlockNumber + size);
 
         uint i;
 		for(i=0; i<MAX_DEPTH; ++i) {
 			if(!isActive(i, size)) break;
-			hash = getHash(roots[i], hash);
+			hash = getHash(peaks[i], hash);
 		}
 		
-		roots[i] = hash;
+		peaks[i] = hash;
 	}
 }
 
 contract MMRVerify is MMRStorage {
 	uint internal constant VERIFY_COST = 6000;
 	
-	function verify(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localRoots) public view returns (bool isVerified, string memory tag) {
+	function verify(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localPeaks) public view returns (bool isVerified, string memory tag) {
         require(tx.origin == msg.sender, "If you want call verify() from another contract, consider using verifyOnChain() instead.");
 		
-		return verifyInternal(blockNumber, blockHash, proof, localBlockNumber, localRoots);
+		return verifyInternal(blockNumber, blockHash, proof, localBlockNumber, localPeaks);
 	}
-	function verifyOnChain(uint blockNumber, bytes32 blockHash, bytes32[] calldata proof, uint localBlockNumber, bytes32[8] calldata localRoots) external returns (bool isVerified, string memory tag) {
+	function verifyOnChain(uint blockNumber, bytes32 blockHash, bytes32[] calldata proof, uint localBlockNumber, bytes32[8] calldata localPeaks) external returns (bool isVerified, string memory tag) {
         _burn(msg.sender, VERIFY_COST);
 		
-		return verifyInternal(blockNumber, blockHash, proof, localBlockNumber, localRoots);
+		return verifyInternal(blockNumber, blockHash, proof, localBlockNumber, localPeaks);
 	}
-	function verifyInternal(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localRoots) internal view returns (bool isVerified, string memory tag) {
+	function verifyInternal(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localPeaks) internal view returns (bool isVerified, string memory tag) {
 		if(blockNumber + 256 >= block.number) return (blockHash == blockhash(blockNumber), "recent_256");
 		
 		if(blockHash == bytes32(0)) return (false, "hash_is_zero");
@@ -168,16 +168,16 @@ contract MMRVerify is MMRStorage {
 		uint localSize = localBlockNumber - baseBlockNumber;
 		uint localOrder = findOrder(offset, localSize);
 		
-		if(localSize == size) return (verifyOrdered(offset, blockHash, proof, _roots[localOrder], localOrder), "localBlockNumber_equals_storedBlockNumber");
+		if(localSize == size) return (verifyOrdered(offset, blockHash, proof, _peaks[localOrder], localOrder), "localBlockNumber_equals_storedBlockNumber");
 		
-		(bool isLocalRootsVerified, bytes32 orderdRoot) = verifyLocalRoots(localBlockNumber, localRoots, localOrder);
+		(bool isLocalPeaksVerified, bytes32 orderdPeak) = verifyLocalPeaks(localBlockNumber, localPeaks, localOrder);
 		
-		if(!isLocalRootsVerified) return (false, "localRoots_not_verified");
+		if(!isLocalPeaksVerified) return (false, "localPeaks_not_verified");
 		
-		return (verifyOrdered(offset, blockHash, proof, orderdRoot, localOrder), "localRoots_is_verified");
+		return (verifyOrdered(offset, blockHash, proof, orderdPeak, localOrder), "localPeaks_is_verified");
 	}
 	
-	function verifyOrdered(uint offset, bytes32 blockHash, bytes32[] memory proof, bytes32 root, uint order) internal pure returns (bool) {
+	function verifyOrdered(uint offset, bytes32 blockHash, bytes32[] memory proof, bytes32 peak, uint order) internal pure returns (bool) {
 		if(order > proof.length) return false;
 		
 		for(uint i=0; i<order; ++i) {
@@ -185,40 +185,40 @@ contract MMRVerify is MMRStorage {
 			offset >>= 1;
 		}
 		
-		return blockHash == root;
+		return blockHash == peak;
 	}
-	function verifyLocalRoots(uint localBlockNumber, bytes32[8] memory localPartialRoots, uint localOrder) internal view returns (bool, bytes32) {
-		require(localBlockNumber + 256 >= block.number, "localBlockNumber smaller than (current block.number-256), can't rebuild roots.");
+	function verifyLocalPeaks(uint localBlockNumber, bytes32[8] memory localPartialPeaks, uint localOrder) internal view returns (bool, bytes32) {
+		require(localBlockNumber + 256 >= block.number, "localBlockNumber smaller than (current block.number-256), can't rebuild peaks.");
 		
 		(, uint64 baseBlockNumber, uint64 size) = unpackData();
 		
 		uint localSize = localBlockNumber - baseBlockNumber;
 		require(localSize <= size, "localBlockNumber larger than stored blockNumber");
 		
-		bytes32[MAX_DEPTH] memory roots;
+		bytes32[MAX_DEPTH] memory peaks;
 		uint i;
 		for(i=0; i<MAX_DEPTH; ++i) {
-		    roots[i] = _roots[i];
+		    peaks[i] = _peaks[i];
 		}
 
-		bytes32[MAX_DEPTH] memory localRoots;
+		bytes32[MAX_DEPTH] memory localPeaks;
 		for(i=0;i<8;++i) {
-			localRoots[i] = localPartialRoots[i];
+			localPeaks[i] = localPartialPeaks[i];
 		}
 		for(;i<MAX_DEPTH;++i) {
-			localRoots[i] = roots[i];
+			localPeaks[i] = peaks[i];
 		}
 		
 		for(uint s=localSize;s<size;++s) {
-			advanceOne(localRoots, baseBlockNumber, s);
+			advanceOne(localPeaks, baseBlockNumber, s);
 		}
 		
 		for(i=0;i<MAX_DEPTH;++i) {
 			if(!isActive(i, size)) continue;
-			if(localRoots[i] != roots[i]) return (false, bytes32(0));
+			if(localPeaks[i] != peaks[i]) return (false, bytes32(0));
 		}
 
-		return (true, localRoots[localOrder]);
+		return (true, localPeaks[localOrder]);
 	}
 }
 
