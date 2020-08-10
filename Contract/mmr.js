@@ -20,15 +20,8 @@ contract MMRToken is ERC20 {
 	}
 }
 
-contract MMRCore is MMRToken {
-	/*
-	function blockhash(uint blockNumber) internal view returns (bytes32) {
-		return bytes32(blockNumber);
-	}
-	*/
-	
+contract MMRStorage is MMRToken {
 	uint internal constant MAX_DEPTH = 40;
-	uint internal constant VERIFY_COST = 6000;
 	
 	uint _packedData;
 	bytes32[MAX_DEPTH] public _roots;
@@ -146,38 +139,42 @@ contract MMRCore is MMRToken {
 		
 		roots[i] = hash;
 	}
+}
 
-	function verify(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localRoots) public view returns (bool) {
+contract MMRVerify is MMRStorage {
+	uint internal constant VERIFY_COST = 6000;
+	
+	function verify(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localRoots) public view returns (bool isVerified, string memory tag) {
         require(tx.origin == msg.sender, "If you want call verify() from another contract, consider using verifyOnChain() instead.");
 		
 		return verifyInternal(blockNumber, blockHash, proof, localBlockNumber, localRoots);
 	}
-	function verifyOnChain(uint blockNumber, bytes32 blockHash, bytes32[] calldata proof, uint localBlockNumber, bytes32[8] calldata localRoots) external returns (bool) {
+	function verifyOnChain(uint blockNumber, bytes32 blockHash, bytes32[] calldata proof, uint localBlockNumber, bytes32[8] calldata localRoots) external returns (bool isVerified, string memory tag) {
         _burn(msg.sender, VERIFY_COST);
 		
 		return verifyInternal(blockNumber, blockHash, proof, localBlockNumber, localRoots);
 	}
-	function verifyInternal(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localRoots) internal view returns (bool) {
-		if(blockNumber + 256 >= block.number) return blockHash == blockhash(blockNumber);
+	function verifyInternal(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localRoots) internal view returns (bool isVerified, string memory tag) {
+		if(blockNumber + 256 >= block.number) return (blockHash == blockhash(blockNumber), "recent_256");
 		
-		if(blockHash == bytes32(0)) return false;
+		if(blockHash == bytes32(0)) return (false, "hash_is_zero");
 		
 		(, uint64 baseBlockNumber, uint64 size) = unpackData();
 		
 		uint offset = blockNumber - baseBlockNumber;
 		
-		require(offset < size);
+		require(offset < size, "blockNumber larger than the largest stored number");
 		
-		uint order = findOrder(offset, size);
-		uint localOrder = findOrder(offset, localBlockNumber - baseBlockNumber);
+		uint localSize = localBlockNumber - baseBlockNumber;
+		uint localOrder = findOrder(offset, localSize);
 		
-		if(order == localOrder) return verifyOrdered(offset, blockHash, proof, _roots[order], order);
+		if(localSize == size) return (verifyOrdered(offset, blockHash, proof, _roots[localOrder], localOrder), "localBlockNumber_equals_storedBlockNumber");
 		
-		if(localOrder>=8) return verifyOrdered(offset, blockHash, proof, _roots[localOrder], localOrder);
+		(bool isLocalRootsVerified, bytes32 orderdRoot) = verifyLocalRoots(localBlockNumber, localRoots, localOrder);
 		
-		if(!verifyLocalRoots(localBlockNumber, localRoots)) return false;
+		if(!isLocalRootsVerified) return (false, "localRoots_not_verified");
 		
-		return verifyOrdered(offset, blockHash, proof, localRoots[localOrder], localOrder);
+		return (verifyOrdered(offset, blockHash, proof, orderdRoot, localOrder), "localRoots_is_verified");
 	}
 	
 	function verifyOrdered(uint offset, bytes32 blockHash, bytes32[] memory proof, bytes32 root, uint order) internal pure returns (bool) {
@@ -190,13 +187,13 @@ contract MMRCore is MMRToken {
 		
 		return blockHash == root;
 	}
-	function verifyLocalRoots(uint localBlockNumber, bytes32[8] memory localPartialRoots) internal view returns (bool) {
-		require(localBlockNumber + 256 >= block.number);
+	function verifyLocalRoots(uint localBlockNumber, bytes32[8] memory localPartialRoots, uint localOrder) internal view returns (bool, bytes32) {
+		require(localBlockNumber + 256 >= block.number, "localBlockNumber smaller than (current block.number-256), can't rebuild roots.");
 		
 		(, uint64 baseBlockNumber, uint64 size) = unpackData();
 		
 		uint localSize = localBlockNumber - baseBlockNumber;
-		require(localSize <= size);
+		require(localSize <= size, "localBlockNumber larger than stored blockNumber");
 		
 		bytes32[MAX_DEPTH] memory roots;
 		uint i;
@@ -209,100 +206,21 @@ contract MMRCore is MMRToken {
 			localRoots[i] = localPartialRoots[i];
 		}
 		for(;i<MAX_DEPTH;++i) {
-			localRoots[i] = isActive(i, localSize) ? roots[i] : bytes32(0);
+			localRoots[i] = roots[i];
 		}
 		
-		uint l = size - localSize;
-		for(i=0;i<l;++i) {
-			advanceOne(localRoots, baseBlockNumber, localSize+i);
+		for(uint s=localSize;s<size;++s) {
+			advanceOne(localRoots, baseBlockNumber, s);
 		}
 		
 		for(i=0;i<MAX_DEPTH;++i) {
-			if(!isActive(i, size)) {
-				roots[i] = bytes32(0);
-			}
-			if(localRoots[i] != roots[i]) return false;
-		}
-
-		return true;
-	}
-}
-
-contract MMRProver is MMRCore {
-	function generateProofMetadata(uint blockNumber) internal view returns (uint order, uint startBlockNumber, uint[] memory proofStartBlockNumbers, uint localBlockNumber, bytes32[8] memory localRoots) {
-		(, uint64 baseBlockNumber, uint64 size) = unpackData();
-		
-		require(blockNumber >= baseBlockNumber);
-		
-		localBlockNumber = baseBlockNumber + size;
-		
-		require(blockNumber < localBlockNumber);
-		
-		uint offset = blockNumber - baseBlockNumber;
-		
-		order = findOrder(offset, size);
-		
-		startBlockNumber = baseBlockNumber + ( size>>(order+1)<<(order+1) );
-		offset = blockNumber - startBlockNumber;
-		
-		proofStartBlockNumbers = new uint[](order);
-		
-		for(uint i=0; i<order; ++i) {
-			proofStartBlockNumbers[i] = startBlockNumber + (((offset>>i)^1)<<i);
-		}
-		
-		for(uint i=0;i<8;++i) {
 			if(!isActive(i, size)) continue;
-			localRoots[i] = _roots[i];
+			if(localRoots[i] != roots[i]) return (false, bytes32(0));
 		}
-	}
-	
-	function generateProof(uint blockNumber) public view returns (bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localRoots) {
-		(uint order, uint startBlockNumber, uint[] memory proofStartBlockNumbers, uint t_localBlockNumber, bytes32[8] memory t_localRoots) = generateProofMetadata(blockNumber);
-		localBlockNumber = t_localBlockNumber;
-		localRoots = t_localRoots;
-		
-		require(startBlockNumber + 256 >= block.number);
-		
-		blockHash = blockhash(blockNumber);
-		
-		proof = new bytes32[](order);
-		
-		for(uint i=0; i<order; ++i) {
-			proof[i] = generateRootHash(proofStartBlockNumbers[i], i);
-		}
-	}
-	function generateRootHash(uint blockNumber, uint height) internal view returns (bytes32) {
-		uint size = 1<<height;
-		bytes32[] memory values = new bytes32[](size);
-		
-		for(uint i=0;i<size;++i) {
-			values[i] = blockhash(blockNumber+i);
-		}
-		
-		for(uint h=0;h<height;++h) {
-			size >>= 1;
-			for(uint i=0;i<size;++i) {
-				values[i] = getHash(values[i*2], values[i*2+1]);
-			}
-		}
-		
-		return values[0];
-	}
-	
-	function generateProofInfo(uint blockNumber) public view returns (uint[2][] memory proofBlockNumbers, uint localBlockNumber, bytes32[8] memory localRoots) {
-		(uint order, , uint[] memory proofStartBlockNumbers, uint t_localBlockNumber, bytes32[8] memory t_localRoots) = generateProofMetadata(blockNumber);
-		localBlockNumber = t_localBlockNumber;
-		localRoots = t_localRoots;
-		
-		proofBlockNumbers = new uint[2][](order);
-		
-		for(uint i=0; i<order; ++i) {
-			proofBlockNumbers[i][0] = proofStartBlockNumbers[i];
-			proofBlockNumbers[i][1] = proofStartBlockNumbers[i] + (1<<i) - 1;
-		}
+
+		return (true, localRoots[localOrder]);
 	}
 }
 
-contract MMR is MMRProver {
+contract MMR is MMRVerify {
 }
