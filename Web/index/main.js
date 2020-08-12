@@ -42,7 +42,7 @@ async function onLoaded() {
 
 async function loadLoggedBlockhashes(contract) {
 	return new Promise((resolve, reject) => {
-		contracts.bhl.Blockhash({}, {fromBlock:ContractMetadata.contracts.bhl.created, toBlock:'latest', }).get(function(error, response) {
+		contracts.bhl.Blockhash({}, {fromBlock:ContractMetadata.contracts.bhl.fromBlock, toBlock:'latest', }).get(function(error, response) {
 			if(error) {
 				reject(error);
 				return;
@@ -171,5 +171,6 @@ async function onVerifyClick(num) {
 	} catch (error) {
 		response = error.message;
 	}
+console.log(response);
 	document.querySelector(`#verifyResult${num}`).textContent = response[0];
 }
