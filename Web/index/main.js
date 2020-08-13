@@ -171,5 +171,5 @@ async function onVerifyClick(num) {
 	} catch (error) {
 		response = error.message;
 	}
-	document.querySelector(`#verifyResult${num}`).textContent = response[0];
+	document.querySelector(`#verifyResult${num}`).textContent = response;
 }
