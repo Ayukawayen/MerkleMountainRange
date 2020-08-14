@@ -144,6 +144,10 @@ contract MMRStorage is MMRToken {
 contract MMRVerify is MMRStorage {
 	uint internal constant VERIFY_COST = 6000;
 	
+	function getVerifyCost() public pure returns (uint) {
+		return VERIFY_COST;
+	}
+	
 	function verify(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localPeaks) public view returns (bool) {
         require(tx.origin == msg.sender, "If you want call verify() from another contract, consider using verifyOnChain() instead.");
 		
@@ -175,39 +179,6 @@ contract MMRVerify is MMRStorage {
 		if(!isLocalPeaksVerified) return false;
 		
 		return verifyOrdered(offset, blockHash, proof, orderdPeak, localOrder);
-	}
-	
-	function taggedVerify(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localPeaks) public view returns (bool isVerified, string memory tag) {
-        require(tx.origin == msg.sender, "If you want call verify() from another contract, consider using verifyOnChain() instead.");
-		
-		return taggedVerifyInternal(blockNumber, blockHash, proof, localBlockNumber, localPeaks);
-	}
-	function taggedVerifyOnChain(uint blockNumber, bytes32 blockHash, bytes32[] calldata proof, uint localBlockNumber, bytes32[8] calldata localPeaks) external returns (bool isVerified, string memory tag) {
-        _burn(msg.sender, VERIFY_COST);
-		
-		return taggedVerifyInternal(blockNumber, blockHash, proof, localBlockNumber, localPeaks);
-	}
-	function taggedVerifyInternal(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localPeaks) internal view returns (bool isVerified, string memory tag) {
-		if(blockNumber + 256 >= block.number) return (blockHash == blockhash(blockNumber), "recent_256");
-		
-		if(blockHash == bytes32(0)) return (false, "hash_is_zero");
-		
-		(, uint64 baseBlockNumber, uint64 size) = unpackData();
-		
-		uint offset = blockNumber - baseBlockNumber;
-		
-		require(offset < size, "blockNumber larger than the largest stored number");
-		
-		uint localSize = localBlockNumber - baseBlockNumber;
-		uint localOrder = findOrder(offset, localSize);
-		
-		if(localSize == size) return (verifyOrdered(offset, blockHash, proof, _peaks[localOrder], localOrder), "localBlockNumber_equals_storedBlockNumber");
-		
-		(bool isLocalPeaksVerified, bytes32 orderdPeak) = verifyLocalPeaks(localBlockNumber, localPeaks, localOrder);
-		
-		if(!isLocalPeaksVerified) return (false, "localPeaks_not_verified");
-		
-		return (verifyOrdered(offset, blockHash, proof, orderdPeak, localOrder), "localPeaks_is_verified");
 	}
 	
 	function verifyOrdered(uint offset, bytes32 blockHash, bytes32[] memory proof, bytes32 peak, uint order) internal pure returns (bool) {
@@ -255,5 +226,40 @@ contract MMRVerify is MMRStorage {
 	}
 }
 
-contract MMR is MMRVerify {
+contract MMRTaggedVerify is MMRVerify {
+	function taggedVerify(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localPeaks) public view returns (bool isVerified, string memory tag) {
+        require(tx.origin == msg.sender, "If you want call verify() from another contract, consider using verifyOnChain() instead.");
+		
+		return taggedVerifyInternal(blockNumber, blockHash, proof, localBlockNumber, localPeaks);
+	}
+	function taggedVerifyOnChain(uint blockNumber, bytes32 blockHash, bytes32[] calldata proof, uint localBlockNumber, bytes32[8] calldata localPeaks) external returns (bool isVerified, string memory tag) {
+        _burn(msg.sender, VERIFY_COST);
+		
+		return taggedVerifyInternal(blockNumber, blockHash, proof, localBlockNumber, localPeaks);
+	}
+	function taggedVerifyInternal(uint blockNumber, bytes32 blockHash, bytes32[] memory proof, uint localBlockNumber, bytes32[8] memory localPeaks) internal view returns (bool isVerified, string memory tag) {
+		if(blockNumber + 256 >= block.number) return (blockHash == blockhash(blockNumber), "recent_256");
+		
+		if(blockHash == bytes32(0)) return (false, "hash_is_zero");
+		
+		(, uint64 baseBlockNumber, uint64 size) = unpackData();
+		
+		uint offset = blockNumber - baseBlockNumber;
+		
+		require(offset < size, "blockNumber larger than the largest stored number");
+		
+		uint localSize = localBlockNumber - baseBlockNumber;
+		uint localOrder = findOrder(offset, localSize);
+		
+		if(localSize == size) return (verifyOrdered(offset, blockHash, proof, _peaks[localOrder], localOrder), "localBlockNumber_equals_storedBlockNumber");
+		
+		(bool isLocalPeaksVerified, bytes32 orderdPeak) = verifyLocalPeaks(localBlockNumber, localPeaks, localOrder);
+		
+		if(!isLocalPeaksVerified) return (false, "localPeaks_not_verified");
+		
+		return (verifyOrdered(offset, blockHash, proof, orderdPeak, localOrder), "localPeaks_is_verified");
+	}
+}
+
+contract MMR is MMRTaggedVerify {
 }
